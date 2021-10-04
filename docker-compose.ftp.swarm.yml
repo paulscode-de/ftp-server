@@ -1,0 +1,66 @@
+version: '3.4'
+
+networks:
+  traefik-public:
+    external: true
+
+services:
+  web:
+    image: ${DOCKER_REGISTRY}/files.${PRIMARY_DOMAIN}
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    networks:
+      - traefik-public
+    healthcheck:
+      test: curl --fail http://localhost || exit 1
+      interval: 60s
+      retries: 5
+      start_period: 20s
+      timeout: 10s
+    volumes:
+      - data:/usr/share/nginx/html/data/
+    deploy:
+      placement:
+        constraints:
+          - node.labels.www.ftp-data == true
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=traefik-public
+        - traefik.constraint-label=traefik-public
+        - traefik.http.routers.ftpweb-http.rule=Host(`files.${PRIMARY_DOMAIN}`)
+        - traefik.http.routers.ftpweb-http.entrypoints=http
+        - traefik.http.routers.ftpweb-http.middlewares=https-redirect
+        - traefik.http.routers.ftpweb-https.rule=Host(`files.${PRIMARY_DOMAIN}`)
+        - traefik.http.routers.ftpweb-https.entrypoints=https
+        - traefik.http.routers.ftpweb-https.tls=true
+        - traefik.http.routers.ftpweb-https.tls.options=mintls12@file
+        - traefik.http.routers.ftpweb-https.tls.certresolver=le
+        - traefik.http.services.ftpweb.loadbalancer.server.port=80
+        - traefik.http.routers.ftpweb-https.middlewares=security-headers, ftpweb-csp
+        - traefik.http.middlewares.ftpweb-csp.headers.contentsecuritypolicy=default-src 'none'; img-src 'self' https://i.postimg.cc; script-src 'self'; style-src 'self'
+    restart: unless-stopped
+  ftpd:
+    image: stilliard/pure-ftpd
+    container_name: pure-ftpd
+    ports:
+      - "21:21"
+      - "30000-30009:30000-30009"
+    volumes:
+      - data:/home/username/
+    deploy:
+      placement:
+        constraints:
+          - node.labels.www.ftp-data == true
+    environment:
+      PUBLICHOST: "localhost"
+      FTP_USER_NAME: NICE_USERNAME_HERE
+      FTP_USER_PASS: SUPERSECRETPASSWORDFORFTPUSAGE
+      FTP_USER_HOME: /home/username
+      ADDED_FLAGS: "--tls=2"
+      TLS_CN: files.${PRIMARY_DOMAIN}
+      TLS_ORG: f1nalboss
+      TLS_C: DE
+    restart: always
+volumes:
+  data:
